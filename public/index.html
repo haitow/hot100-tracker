@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Hot 100 · 50 天刷题计划</title>
+  <link rel="stylesheet" href="/app.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark">H.</span><span>HOT 100<br><small>STUDY TRACKER</small></span></div>
+      <p class="side-label">学习路线</p>
+      <nav id="stage-nav" aria-label="阶段导航"></nav>
+    </aside>
+
+    <main class="main">
+      <div class="topline"><span>JAVA · ALGORITHM PRACTICE</span><span>50 DAYS / 100 PROBLEMS</span></div>
+      <header class="hero">
+        <div class="hero-copy">
+          <span class="eyebrow">A PERSONAL LEARNING ROADMAP</span>
+          <h1>每天两题，<br><em>看见自己的进步。</em></h1>
+          <p>按知识前置顺序练习 Hot 100。题目、卡点和掌握程度都收在一个页面里。</p>
+          <button id="jump-button" class="primary-button" type="button">继续 Day 01 <span aria-hidden="true">↗</span></button>
+        </div>
+        <div class="hero-art" aria-hidden="true"><span>100</span><small>PROBLEMS<br>ONE STEP AT A TIME</small></div>
+      </header>
+
+      <section class="overview" aria-label="学习进度">
+        <div class="overview-heading"><div><span class="eyebrow dark">YOUR PROGRESS</span><h2>学习进度</h2></div><span id="save-status" class="save-status" role="status">正在读取本地文件…</span></div>
+        <div class="progress-track" role="progressbar" aria-label="已完成题数" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="progress-fill"></span></div>
+        <div class="stats"><div><strong id="done-count">0</strong><span>已完成 / 100</span></div><div><strong id="day-count">0</strong><span>完成天数 / 50</span></div><div><strong id="review-count">0</strong><span>C 题待复习</span></div></div>
+      </section>
+
+      <div class="content-heading"><div><span class="eyebrow dark">THE ROADMAP</span><h2>50 天路线图</h2></div><p>勾选即保存 · 点击题目打开力扣 · 笔记离开输入框后保存</p></div>
+      <div id="stages" class="stages"></div>
+      <footer>计划来自 <a href="https://leetcode.cn/studyplan/top-100-liked/" target="_blank" rel="noopener noreferrer">力扣 Hot 100</a> · 进度文件：<code>data/progress.json</code></footer>
+    </main>
+  </div>
+</body>
+</html>
