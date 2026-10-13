@@ -1,3 +1,8 @@
 node_modules/
 *.class
 *.tmp
+docs/
+.agents/
+skills-lock.json
+AGENTS.md
+MEMORY.md

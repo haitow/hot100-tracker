@@ -2,6 +2,7 @@ const http = require('node:http');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
+const { randomUUID } = require('node:crypto');
 
 const appDir = __dirname;
 const publicDir = path.join(appDir, 'public');
@@ -11,6 +12,16 @@ const progressPath = path.join(dataDir, 'progress.json');
 const host = '127.0.0.1';
 const maxBodyBytes = 65536;
 let saveQueue = Promise.resolve();
+const runtimeId = randomUUID();
+const staticFiles = new Map([
+  ['/', ['index.html', 'text/html']],
+  ['/knowledge', ['knowledge.html', 'text/html']],
+  ['/app.css', ['app.css', 'text/css']],
+  ['/app.js', ['app.js', 'text/javascript']],
+  ['/knowledge.css', ['knowledge.css', 'text/css']],
+  ['/knowledge.js', ['knowledge.js', 'text/javascript']],
+  ['/knowledge-data.js', ['knowledge-data.js', 'text/javascript']],
+]);
 
 function send(response, status, body, contentType = 'application/json; charset=utf-8') {
   const bytes = Buffer.from(body, 'utf8');
@@ -119,12 +130,11 @@ const server = http.createServer(async (request, response) => {
 
   try {
     const pathname = new URL(request.url, origin).pathname;
-    if (request.method === 'GET' && pathname === '/') {
-      send(response, 200, await fs.readFile(path.join(publicDir, 'index.html'), 'utf8'), 'text/html; charset=utf-8');
-    } else if (request.method === 'GET' && pathname === '/app.css') {
-      send(response, 200, await fs.readFile(path.join(publicDir, 'app.css'), 'utf8'), 'text/css; charset=utf-8');
-    } else if (request.method === 'GET' && pathname === '/app.js') {
-      send(response, 200, await fs.readFile(path.join(publicDir, 'app.js'), 'utf8'), 'text/javascript; charset=utf-8');
+    if (request.method === 'GET' && staticFiles.has(pathname)) {
+      const [filename, contentType] = staticFiles.get(pathname);
+      send(response, 200, await fs.readFile(path.join(publicDir, filename), 'utf8'), `${contentType}; charset=utf-8`);
+    } else if (request.method === 'GET' && pathname === '/api/session') {
+      sendJson(response, 200, { id: runtimeId });
     } else if (request.method === 'GET' && pathname === '/api/plan') {
       sendJson(response, 200, { stages: await readPlan() });
     } else if (request.method === 'GET' && pathname === '/api/progress') {

@@ -27,8 +27,6 @@ function setItem(id, changes) {
 function queueSave() {
   const snapshot = JSON.stringify(state.progress);
   const revision = ++saveRevision;
-  saveStatus.textContent = '正在写入 progress.json…';
-  saveStatus.classList.remove('error');
   saveQueue = saveQueue.catch(() => {}).then(async () => {
     const response = await fetch('/api/progress', {
       method: 'PUT',
@@ -36,10 +34,15 @@ function queueSave() {
       body: snapshot,
     });
     if (!response.ok) throw new Error('保存失败');
-    if (revision === saveRevision) saveStatus.textContent = '已保存到 progress.json';
+    if (revision === saveRevision) {
+      saveStatus.textContent = '';
+      saveStatus.hidden = true;
+      saveStatus.classList.remove('error');
+    }
   }).catch(() => {
     if (revision === saveRevision) {
-      saveStatus.textContent = '保存失败，请保持页面打开并重试修改';
+      saveStatus.textContent = '保存失败';
+      saveStatus.hidden = false;
       saveStatus.classList.add('error');
     }
   });
@@ -69,7 +72,7 @@ function questionRow(question) {
   const selectLabel = element('label', 'mastery-label', '掌握');
   const select = element('select', 'mastery-select');
   select.setAttribute('aria-label', `${question.id}. ${question.title} 的掌握程度`);
-  [['', '—'], ['A', 'A · 独立'], ['B', 'B · 提示'], ['C', 'C · 题解']].forEach(([value, text]) => {
+  [['', '未选择'], ['A', 'A · 独立'], ['B', 'B · 提示'], ['C', 'C · 题解']].forEach(([value, text]) => {
     const option = element('option', '', text);
     option.value = value;
     select.append(option);
@@ -81,12 +84,17 @@ function questionRow(question) {
   const note = element('input', 'note-input');
   note.type = 'text';
   note.maxLength = 200;
-  note.placeholder = '一句话记录卡点';
+  note.placeholder = '笔记';
   note.value = item.note;
   note.setAttribute('aria-label', `${question.id}. ${question.title} 的复盘笔记`);
   note.addEventListener('change', () => setItem(question.id, { note: note.value.trim() }));
   meta.append(selectLabel, note);
   row.append(head, meta);
+  const knowledgeButton = element('button', 'related-knowledge', '相关知识 ↗');
+  knowledgeButton.type = 'button';
+  knowledgeButton.setAttribute('aria-label', `${question.id}. ${question.title} 的相关知识`);
+  knowledgeButton.addEventListener('click', () => window.Hot100KnowledgeUI.openRelated(question, state.stages));
+  row.append(knowledgeButton);
   return row;
 }
 
@@ -94,6 +102,10 @@ function render() {
   state.stages.forEach((stage) => {
     const navLink = element('a', 'nav-link');
     navLink.href = `#stage-${stage.number}`;
+    navLink.addEventListener('click', () => {
+      stageNav.querySelectorAll('a').forEach((link) => link.removeAttribute('aria-current'));
+      navLink.setAttribute('aria-current', 'location');
+    });
     navLink.append(element('span', 'nav-number', String(stage.number).padStart(2, '0')),
       element('span', '', stage.title), element('span', 'nav-arrow', '↗'));
     stageNav.append(navLink);
@@ -102,18 +114,16 @@ function render() {
     section.id = `stage-${stage.number}`;
     const header = element('div', 'stage-heading');
     const headingText = element('div');
-    headingText.append(element('span', 'stage-index', `STAGE ${String(stage.number).padStart(2, '0')}`),
-      element('h2', '', stage.title));
+    headingText.append(element('h2', '', stage.title));
     const first = stage.days[0].number;
     const last = stage.days.at(-1).number;
-    header.append(headingText, element('span', 'stage-range', `DAY ${String(first).padStart(2, '0')}—${String(last).padStart(2, '0')}`));
+    header.append(headingText, element('span', 'stage-range', `DAY ${String(first).padStart(2, '0')}-${String(last).padStart(2, '0')}`));
     const grid = element('div', 'day-grid');
     stage.days.forEach((day) => {
       const card = element('article', 'day-card');
       card.id = `day-${day.number}`;
       const cardHead = element('div', 'day-head');
-      cardHead.append(element('span', 'day-number', `DAY ${String(day.number).padStart(2, '0')}`),
-        element('span', 'day-state'));
+      cardHead.append(element('span', 'day-number', `DAY ${String(day.number).padStart(2, '0')}`));
       card.append(cardHead, element('h3', '', day.title));
       const questions = element('div', 'questions');
       day.questions.forEach((question) => questions.append(questionRow(question)));
@@ -141,7 +151,8 @@ function updateSummary() {
   jumpButton.textContent = next ? `继续 Day ${String(next.number).padStart(2, '0')} ↗` : '全部完成 ✓';
   jumpButton.onclick = () => {
     const target = next ? document.getElementById(`day-${next.number}`) : document.getElementById('stages');
-    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    target.scrollIntoView({ behavior: reduced ? 'instant' : 'smooth', block: 'center' });
   };
   days.forEach((day) => {
     const card = document.getElementById(`day-${day.number}`);
@@ -149,7 +160,6 @@ function updateSummary() {
     const complete = day.questions.every((question) => itemFor(question.id).done);
     card.classList.toggle('complete', complete);
     card.classList.toggle('current', next?.number === day.number);
-    card.querySelector('.day-state').textContent = complete ? '已完成' : next?.number === day.number ? '进行中' : '待开始';
   });
 }
 
@@ -162,9 +172,11 @@ async function initialize() {
     state.stages = (await planResponse.json()).stages;
     state.progress = await progressResponse.json();
     render();
-    saveStatus.textContent = '已从本地文件读取进度';
+    saveStatus.textContent = '';
+    saveStatus.hidden = true;
   } catch {
-    saveStatus.textContent = '读取失败，请重新启动本地服务';
+    saveStatus.textContent = '加载失败';
+    saveStatus.hidden = false;
     saveStatus.classList.add('error');
   }
 }
