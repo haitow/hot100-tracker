@@ -1,6 +1,9 @@
 node_modules/
 *.class
 *.tmp
+.runtime/
+/start.exe
+/stop.exe
 docs/
 .agents/
 skills-lock.json

@@ -2,7 +2,9 @@ const http = require('node:http');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
-const { randomUUID } = require('node:crypto');
+const { randomUUID, createHash } = require('node:crypto');
+const net = require('node:net');
+const fsSync = require('node:fs');
 
 const appDir = __dirname;
 const publicDir = path.join(appDir, 'public');
@@ -13,6 +15,30 @@ const host = '127.0.0.1';
 const maxBodyBytes = 65536;
 let saveQueue = Promise.resolve();
 const runtimeId = randomUUID();
+const background = process.argv.includes('--background');
+let logQueue = Promise.resolve();
+let stopping = false;
+let servicePort = 0;
+
+function serviceLog(message, error = false) {
+  if (!background) {
+    (error ? console.error : console.log)(message);
+    return;
+  }
+  const directory = path.join(appDir, '.runtime');
+  logQueue = logQueue.catch(() => {}).then(async () => {
+    await fs.mkdir(directory, { recursive: true });
+    await fs.appendFile(path.join(directory, 'server.log'), `${new Date().toISOString()} ${message}\n`);
+  }).catch(() => {});
+}
+
+function openBrowser(url) {
+  if (!process.argv.includes('--no-open') && process.platform === 'win32') {
+    const launcher = spawn('cmd.exe', ['/c', 'start', '', url], { windowsHide: true, detached: true, stdio: 'ignore' });
+    launcher.on('error', () => serviceLog('Could not open the browser.', true));
+    launcher.unref();
+  }
+}
 const staticFiles = new Map([
   ['/', ['index.html', 'text/html']],
   ['/knowledge', ['knowledge.html', 'text/html']],
@@ -121,7 +147,7 @@ async function writeProgress(data) {
 }
 
 const server = http.createServer(async (request, response) => {
-  const port = server.address().port;
+  const port = servicePort;
   const origin = `http://${host}:${port}`;
   if (request.headers.host !== `${host}:${port}`) {
     sendJson(response, 403, { error: 'Invalid host' });
@@ -160,17 +186,120 @@ const server = http.createServer(async (request, response) => {
     }
   } catch (error) {
     const status = error.status ?? (error instanceof SyntaxError ? 400 : 500);
-    console.error('Request failed:', error.message);
+    serviceLog(`Request failed (${status}).`, true);
     sendJson(response, status, { error: status === 500 ? 'Could not read or save the local files' : error.message });
   }
 });
 
-server.listen(0, host, () => {
-  const url = `http://${host}:${server.address().port}/`;
-  console.log(`Hot 100 tracker: ${url}`);
-  console.log(`Progress file: ${progressPath}`);
-  if (!process.argv.includes('--no-open') && process.platform === 'win32') {
-    const launcher = spawn('cmd.exe', ['/c', 'start', '', url], { windowsHide: true, detached: true, stdio: 'ignore' });
-    launcher.unref();
-  }
+const connections = new Map();
+server.on('connection', (socket) => {
+  connections.set(socket, 0);
+  socket.on('close', () => connections.delete(socket));
 });
+server.prependListener('request', (request, response) => {
+  const socket = request.socket;
+  connections.set(socket, (connections.get(socket) ?? 0) + 1);
+  let completed = false;
+  const finish = () => {
+    if (completed) return;
+    completed = true;
+    const pending = Math.max(0, (connections.get(socket) ?? 1) - 1);
+    if (connections.has(socket)) connections.set(socket, pending);
+    if (stopping && pending === 0) socket.end();
+  };
+  response.once('finish', finish);
+  response.once('close', finish);
+});
+
+function listen() {
+  server.listen(0, host, () => {
+    servicePort = server.address().port;
+    const url = `http://${host}:${servicePort}/`;
+    serviceLog(`Hot 100 tracker: ${url}`);
+    if (!background) serviceLog(`Progress file: ${progressPath}`);
+    openBrowser(url);
+  });
+}
+
+// A per-project Windows pipe coordinates launchers without exposing a stop HTTP API.
+if (process.platform !== 'win32') {
+  listen();
+} else {
+  const canonical = fsSync.realpathSync.native(appDir).replace(/\\/g, '/').toLowerCase();
+  const key = createHash('sha256').update(canonical).digest('hex').slice(0, 32);
+  const pipePath = `\\\\.\\pipe\\hot100-${key}`;
+  const control = net.createServer((socket) => {
+    let input = '';
+    socket.setEncoding('utf8');
+    socket.setTimeout(1500, () => socket.destroy());
+    socket.on('error', () => {});
+    socket.on('data', (chunk) => {
+      input += chunk;
+      if (input.length > 128) { socket.destroy(); return; }
+      if (!input.includes('\n')) return;
+      const command = input.trim();
+      input = '';
+      if (command === 'STATUS') {
+        const state = stopping ? 'STOPPING' : servicePort ? 'READY' : 'STARTING';
+        socket.end(`HOT100\t${state}\t${process.pid}\t${servicePort}\t${runtimeId}\n`);
+      } else if (command === `STOP ${runtimeId}` && !stopping && servicePort) {
+        stopping = true;
+        socket.setTimeout(0);
+        (async () => {
+          if (server.listening) await new Promise((resolve) => {
+            server.close(resolve);
+            // Browsers can leave speculative sockets open without sending a request.
+            for (const [connection, pending] of connections) {
+              if (pending === 0) connection.destroy();
+            }
+          });
+          await saveQueue.catch(() => {});
+          serviceLog('Service stopped.');
+          await logQueue.catch(() => {});
+          socket.end('STOPPED\n');
+          control.close();
+        })().catch(() => { socket.end('ERROR\n'); control.close(); });
+      } else {
+        socket.end('ERROR\n');
+      }
+    });
+  });
+  control.on('error', (error) => {
+    if (error.code !== 'EADDRINUSE') {
+      serviceLog('Could not create the local service control pipe.', true);
+      process.exitCode = 1;
+      return;
+    }
+    const existing = net.connect(pipePath);
+    let reply = '';
+    existing.setEncoding('utf8');
+    existing.setTimeout(1500, () => existing.destroy(new Error('Service lookup timed out')));
+    existing.on('connect', () => existing.write('STATUS\n'));
+    existing.on('data', (chunk) => {
+      reply += chunk;
+      if (reply.length > 256) existing.destroy(new Error('Invalid service response'));
+    });
+    existing.on('end', () => {
+      const fields = reply.trim().split('\t');
+      const port = Number(fields[3]);
+      if (fields[0] !== 'HOT100' || fields[1] !== 'READY' || !Number.isInteger(port) || port < 1 || port > 65535) {
+        serviceLog('An existing service is still starting or stopping. Retry shortly.', true);
+        process.exitCode = 1;
+        return;
+      }
+      const url = `http://${host}:${port}/`;
+      serviceLog(`Hot 100 tracker: ${url}`);
+      openBrowser(url);
+    });
+    existing.on('error', () => {
+      serviceLog('Could not connect to the existing project service.', true);
+      process.exitCode = 1;
+    });
+  });
+  server.on('error', () => {
+    serviceLog('Could not start the local HTTP service.', true);
+    process.exitCode = 1;
+    control.close();
+  });
+  control.listen(pipePath, listen);
+}
