@@ -2,6 +2,7 @@ node_modules/
 *.class
 *.tmp
 .runtime/
+/dist/
 /start.exe
 /stop.exe
 docs/
