@@ -92,6 +92,7 @@ function questionRow(question) {
   row.append(head, meta);
   const knowledgeButton = element('button', 'related-knowledge', '相关知识 ↗');
   knowledgeButton.type = 'button';
+  knowledgeButton.dataset.questionId = question.id;
   knowledgeButton.setAttribute('aria-label', `${question.id}. ${question.title} 的相关知识`);
   knowledgeButton.addEventListener('click', () => window.Hot100KnowledgeUI.openRelated(question, state.stages));
   row.append(knowledgeButton);
@@ -172,6 +173,7 @@ async function initialize() {
     state.stages = (await planResponse.json()).stages;
     state.progress = await progressResponse.json();
     render();
+    window.Hot100KnowledgeUI.restoreRelated(state.stages);
     saveStatus.textContent = '';
     saveStatus.hidden = true;
   } catch {
@@ -180,5 +182,9 @@ async function initialize() {
     saveStatus.classList.add('error');
   }
 }
+
+window.addEventListener('pageshow', (event) => {
+  if (event.persisted) window.Hot100KnowledgeUI.restoreRelated(state.stages, { fromCache: true });
+});
 
 initialize();

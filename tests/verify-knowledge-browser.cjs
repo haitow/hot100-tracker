@@ -109,6 +109,7 @@ async function main() {
     await preview.route('**/knowledge-data.js', (route) => route.fulfill({ contentType: 'text/javascript', body: 'window.Hot100Knowledge = ' + JSON.stringify(fixed) + ';' }));
     await preview.goto(url);
     await button(preview, '1. 两数之和 的相关知识').click();
+    assert.notEqual(await preview.locator('.related-full-link').getAttribute('target'), '_blank', 'Full library must open in the current tab');
     assert.equal(await preview.locator('dialog .reader-sidebar').count(), 0);
     assert.equal(await preview.locator('dialog .method-table th').count(), 2);
     const previewBox = await preview.locator('dialog').boundingBox();
@@ -335,18 +336,60 @@ async function main() {
       await page.keyboard.press('Tab');
       assert.equal(await page.evaluate(() => document.querySelector('dialog').contains(document.activeElement)), true);
     }
-    const opened = context.waitForEvent('page');
-    await page.locator('.related-full-link').click();
-    const popup = await opened; await popup.waitForLoadState(); await ready(popup, session.id);
-    assert.equal(await button(popup, 'HashMap · 键值映射').getAttribute('aria-expanded'), 'true');
-    assert((await headingTop(popup, 'kb-topic-hashmap')) < 210, 'Explicit topic link failed');
-    await popup.close();
+    const followRelatedAndBack = async (target, currentContext, screenshotName) => {
+      const selected = target.getByRole('tab', { selected: true });
+      const topicId = await selected.getAttribute('data-topic');
+      const reading = await target.evaluate(() => ({ tracker: scrollY, article: document.querySelector('dialog .reader-content').scrollTop }));
+      await target.evaluate(() => { window.relatedReturnProbe = true; });
+      const pageCount = currentContext.pages().length;
+      assert.equal(await target.locator('.related-full-link').textContent(), '完整知识库 ↗');
+      await Promise.all([
+        target.waitForURL(url + 'knowledge#kb-topic-' + topicId),
+        target.locator('.related-full-link').click(),
+      ]);
+      await ready(target, session.id);
+      assert.equal(currentContext.pages().length, pageCount, 'Full library opened another tab');
+      assert((await headingTop(target, 'kb-topic-' + topicId)) < 210, 'Selected topic deep link failed');
+      await target.goBack();
+      await target.locator('dialog[open]').waitFor();
+      const restored = ({ topicId, reading }) =>
+        document.querySelector('.related-topic-choice[aria-selected="true"]')?.dataset.topic === topicId
+        && Math.abs(document.querySelector('dialog .reader-content').scrollTop - reading.article) < 2
+        && Math.abs(scrollY - reading.tracker) < 2;
+      await target.waitForFunction(restored, { topicId, reading });
+      assert.equal(await target.evaluate(() => window.relatedReturnProbe === true), false, 'Uncached history path was not exercised');
+      // The service's no-store responses prevent caching in this browser. Exercise
+      // the persisted-pageshow handler with the live modal still in the document.
+      await target.evaluate(() => {
+        window.scrollTo({ top: 0, behavior: 'instant' });
+        document.querySelector('dialog .reader-content').scrollTop = 0;
+        window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+      });
+      await target.waitForFunction(restored, { topicId, reading });
+      assert.equal(await target.locator('body').evaluate((body) => body.classList.contains('knowledge-dialog-open')), true);
+      if (screenshotName) await shot(target, screenshotName);
+    };
+    await page.locator('dialog .reader-content').evaluate((content) => { content.scrollTop = 340; });
+    await followRelatedAndBack(page, context, 'knowledge-modal-return');
+    await page.getByRole('tab').last().click();
+    await page.locator('dialog .reader-content').evaluate((content) => { content.scrollTop = 180; });
+    await followRelatedAndBack(page, context);
     await page.keyboard.press('Escape');
     assert.equal(await page.locator('dialog').isVisible(), false);
+    assert.equal(await page.evaluate(() => Boolean(history.state?.hot100Related)), false, 'Closing left a stale modal snapshot');
     assert(Math.abs((await page.evaluate(() => window.scrollY)) - scrollBefore) < 2);
     assert.equal(await related.evaluate((item) => document.activeElement === item), true);
     await related.click(); await page.mouse.click(15, 15);
     assert.equal(await page.locator('dialog').isVisible(), false);
+    const laterRelated = page.locator('#day-35 .related-knowledge').last();
+    await laterRelated.click();
+    assert(await page.evaluate(() => scrollY > 1000), 'Later-question fixture did not exercise tracker scrolling');
+    await page.locator('dialog .reader-content').evaluate((content) => { content.scrollTop = 220; });
+    await followRelatedAndBack(page, context);
+    await page.reload();
+    await page.locator('.related-knowledge').first().waitFor();
+    assert.equal(await page.locator('dialog[open]').count(), 0, 'Refresh unexpectedly reopened the modal');
+    assert.equal(await page.evaluate(() => Boolean(history.state?.hot100Related)), false, 'Refresh retained a stale modal snapshot');
 
     const mobileContext = await contextFor({ width: 390, height: 844 });
     const mobile = await mobileContext.newPage();
@@ -378,6 +421,7 @@ async function main() {
     assert(menu.x >= 0 && menu.x + menu.width <= 390);
     await mobile.locator('.chapter-menu a[href="#related-hashmap-compute-if-absent"]').click();
     assert.equal(await mobile.locator('.chapter-menu').isVisible(), false);
+    await followRelatedAndBack(mobile, mobileContext, 'knowledge-modal-mobile-return');
     await button(mobile, '关闭相关知识').click();
     await mobile.setViewportSize({ width: 320, height: 700 });
     await button(mobile, '1. 两数之和 的相关知识').click();
@@ -492,7 +536,8 @@ async function main() {
       exclusiveBranches: 'passed', oneLevelExpansion: 'passed', safeSyntaxHighlighting: 'passed', codeCopyFeedback: 'passed',
       legacyReadingState: 'passed',
       unifiedSidebarSearch: 'passed', preservedSearchResults: 'passed', searchRankingAndDeduplication: 'passed',
-      borderlessSelection: 'passed', compactReadingToolbar: 'passed',
+      borderlessSelection: 'passed', compactReadingToolbar: 'passed', sameTabRelatedNavigation: 'passed', relatedHistoryRestoration: 'passed',
+      relatedHistoryReload: 'passed', persistedPageshowHandler: 'passed', staleModalCleanup: 'passed',
       knowledgeWrites: 0, fixtureProgressUnchanged: true, browserErrors: 0 }));
   } finally {
     await browser?.close(); await stop();

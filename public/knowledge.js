@@ -687,7 +687,15 @@
   let dialog;
   let relatedReader;
 
-  function openRelated(question, stages) {
+  function clearRelatedReturn() {
+    if (!history.state?.hot100Related) return;
+    const saved = { ...history.state };
+    delete saved.hot100Related;
+    history.replaceState(saved, '');
+    history.scrollRestoration = 'auto';
+  }
+
+  function openRelated(question, stages, { topicId } = {}) {
     if (!dialog) {
       dialog = node('dialog', 'knowledge-dialog');
       dialog.setAttribute('aria-labelledby', 'related-title');
@@ -696,6 +704,7 @@
         document.body.classList.remove('knowledge-dialog-open');
         relatedReader?.destroy();
         relatedReader = null;
+        clearRelatedReturn();
       });
       document.body.append(dialog);
     }
@@ -713,9 +722,17 @@
     tabs.setAttribute('aria-label', '关联知识点');
     const readerRoot = node('div', 'related-reader-root');
     const fullLink = node('a', 'related-full-link', '完整知识库 ↗');
-    fullLink.target = '_blank';
-    fullLink.rel = 'noopener noreferrer';
     fullLink.href = '/knowledge';
+    fullLink.addEventListener('click', (event) => {
+      if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+      history.replaceState({ ...history.state, hot100Related: {
+        questionId: question.id,
+        topicId: tabs.querySelector('[aria-selected="true"]')?.dataset.topic,
+        trackerScroll: window.scrollY,
+        articleScroll: relatedReader?.content.scrollTop ?? 0,
+      } }, '');
+      history.scrollRestoration = 'manual';
+    });
     const choose = (topic) => {
       tabs.querySelectorAll('button').forEach((item) => {
         const selected = item.dataset.topic === topic.id;
@@ -754,7 +771,7 @@
       relatedReader.content.id = 'related-article';
       relatedReader.content.setAttribute('role', 'tabpanel');
       picker.append(relatedReader.toolbar);
-      choose(topics[0]);
+      choose(topics.find((topic) => topic.id === topicId) ?? topics[0]);
     } else readerRoot.append(node('p', 'search-empty', '暂无关联知识'));
     document.body.classList.add('knowledge-dialog-open');
     dialog.showModal();
@@ -762,7 +779,29 @@
     close.focus();
   }
 
-  window.Hot100KnowledgeUI = { openRelated };
+  function restoreRelated(stages, { fromCache = false } = {}) {
+    if (!fromCache && performance.getEntriesByType('navigation')[0]?.type !== 'back_forward') {
+      clearRelatedReturn();
+      return;
+    }
+    const saved = history.state?.hot100Related;
+    if (!saved || !Number.isFinite(saved.trackerScroll) || !Number.isFinite(saved.articleScroll)) return;
+    const question = allProblems(stages).find((item) => item.id === saved.questionId);
+    if (!question) return;
+    history.scrollRestoration = 'manual';
+    if (!dialog?.open) {
+      document.querySelector(`.related-knowledge[data-question-id="${question.id}"]`)?.focus({ preventScroll: true });
+      openRelated(question, stages, { topicId: saved.topicId });
+    }
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (!dialog?.open) return;
+      window.scrollTo({ top: saved.trackerScroll, behavior: 'instant' });
+      relatedReader?.content.scrollTo({ top: saved.articleScroll, behavior: 'instant' });
+      relatedReader?.scheduleActive();
+    }));
+  }
+
+  window.Hot100KnowledgeUI = { openRelated, restoreRelated };
 
   async function initializeKnowledge() {
     const root = document.getElementById('knowledge-reader');
