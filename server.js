@@ -42,6 +42,7 @@ function openBrowser(url) {
 const staticFiles = new Map([
   ['/', ['index.html', 'text/html']],
   ['/knowledge', ['knowledge.html', 'text/html']],
+  ['/favicon.svg', ['favicon.svg', 'image/svg+xml']],
   ['/app.css', ['app.css', 'text/css']],
   ['/app.js', ['app.js', 'text/javascript']],
   ['/knowledge.css', ['knowledge.css', 'text/css']],

@@ -69,7 +69,7 @@ async function main() {
     await fs.mkdir(path.join(temporary, 'data'));
     if (screenshotDir) await fs.mkdir(screenshotDir, { recursive: true });
     for (const file of ['server.js', 'hot100-50-day-plan.md']) await fs.copyFile(path.join(project, file), path.join(temporary, file));
-    for (const file of ['index.html', 'app.css', 'app.js', 'knowledge.html', 'knowledge.css', 'knowledge.js', 'knowledge-data.js'])
+    for (const file of ['index.html', 'app.css', 'app.js', 'knowledge.html', 'knowledge.css', 'knowledge.js', 'knowledge-data.js', 'favicon.svg'])
       await fs.copyFile(path.join(project, 'public', file), path.join(temporary, 'public', file));
     // A test-only preload reuses the origin after a real restart, exposing stale-state bugs.
     await fs.writeFile(path.join(temporary, 'test-port.cjs'), "const http = require('node:http');\nconst listen = http.Server.prototype.listen;\nconst port = Number(process.argv.find(arg => arg.startsWith('--test-port='))?.split('=')[1]) || 0;\nhttp.Server.prototype.listen = function(value, ...args) { return listen.call(this, port || value, ...args); };\n");
@@ -84,11 +84,12 @@ async function main() {
     assert.equal(days.length, 50);
     assert(days.every((day, i) => day.number === i + 1 && day.questions.length === 2));
     assert.equal(new Set(days.flatMap((day) => day.questions.map((question) => question.id))).size, 100);
-    for (const route of ['knowledge', 'knowledge.js', 'knowledge.css', 'knowledge-data.js', 'api/session']) {
+    for (const route of ['knowledge', 'knowledge.js', 'knowledge.css', 'knowledge-data.js', 'favicon.svg', 'api/session']) {
       const response = await fetch(url + route);
       assert.equal(response.status, 200);
       assert(response.headers.get('content-security-policy').includes("script-src 'self'"));
       assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
+      if (route === 'favicon.svg') assert(response.headers.get('content-type').startsWith('image/svg+xml'));
     }
     assert.equal((await fetch(url + 'missing-file.js')).status, 404);
     for (const route of ['api/plan', 'api/session']) assert.equal(await new Promise((resolve, reject) =>
@@ -108,6 +109,13 @@ async function main() {
     ] };
     await preview.route('**/knowledge-data.js', (route) => route.fulfill({ contentType: 'text/javascript', body: 'window.Hot100Knowledge = ' + JSON.stringify(fixed) + ';' }));
     await preview.goto(url);
+    assert.equal(await preview.locator('link[rel="icon"]').getAttribute('href'), '/favicon.svg');
+    assert.equal(await preview.evaluate(async () => {
+      const icon = new Image();
+      icon.src = document.querySelector('link[rel="icon"]').href;
+      await icon.decode();
+      return icon.naturalWidth === 38 && icon.naturalHeight === 38;
+    }), true, 'Favicon failed to load under the application CSP');
     await button(preview, '1. 两数之和 的相关知识').click();
     assert.notEqual(await preview.locator('.related-full-link').getAttribute('target'), '_blank', 'Full library must open in the current tab');
     assert.equal(await preview.locator('dialog .reader-sidebar').count(), 0);
@@ -121,6 +129,7 @@ async function main() {
     await button(preview, '关闭相关知识').click();
     await shot(preview, 'tracker-fixed');
     await preview.goto(url + 'knowledge');
+    assert.equal(await preview.locator('link[rel="icon"]').getAttribute('href'), '/favicon.svg');
     await ready(preview, session.id);
     assert.equal(await preview.locator('.directory-link:visible').count(), 1);
     await shot(preview, 'knowledge-initial-fixed');
