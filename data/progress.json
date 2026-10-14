@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "items": {
+    "1": {
+      "done": true,
+      "mastery": "B",
+      "note": ""
+    },
+    "49": {
+      "done": true,
+      "mastery": null,
+      "note": ""
+    },
+    "53": {
+      "done": true,
+      "mastery": null,
+      "note": ""
+    },
+    "121": {
+      "done": true,
+      "mastery": null,
+      "note": ""
+    },
+    "128": {
+      "done": true,
+      "mastery": null,
+      "note": ""
+    },
+    "136": {
+      "done": true,
+      "mastery": null,
+      "note": ""
+    },
+    "169": {
+      "done": true,
+      "mastery": null,
+      "note": ""
+    },
+    "189": {
+      "done": true,
+      "mastery": "C",
+      "note": ""
+    },
+    "238": {
+      "done": true,
+      "mastery": "B",
+      "note": ""
+    },
+    "283": {
+      "done": true,
+      "mastery": null,
+      "note": ""
+    }
+  }
+}
